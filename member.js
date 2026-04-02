@@ -69,14 +69,13 @@ function renderTable() {
         return;
     }
 
-    const fragment = document.createDocumentFragment(); // 🌟 อัปเกรดความเร็ว
-
     pageData.forEach((row) => {
         const id = row[0] || "-";
         const name = row[2] || "ไม่ระบุชื่อ";
         const empCode = row[3] || "-";
         const dept = row[4] || "-";
 
+        // 🌟 แก้ไขบัครูปภาพ: ใช้รูป Default ถ้า URL ไม่ถูกต้อง
         let imgUrl = row[5];
         if (!imgUrl || String(imgUrl).trim() === "" || !String(imgUrl).startsWith("http")) {
             imgUrl = DEFAULT_AVATAR;
@@ -107,7 +106,7 @@ function renderTable() {
                 </div>
             </td>
             <td class="py-4 px-5 text-center">
-                <span class="inline-block px-3 py-1 text-xs rounded-lg font-bold bg-medical-50 text-medical-700 border border-medical-100">${dept}</span>
+                <span class="inline-block px-3 py-1 text-xs rounded-lg font-bold bg-medical-50 text-medical-700 border border-medical-100">ปี ${dept}</span>
             </td>
             <td class="py-4 px-5 text-center">
                 <div class="flex justify-center gap-2">
@@ -119,10 +118,9 @@ function renderTable() {
 
         tr.querySelector('.edit-btn').onclick = () => openEditModal(row);
         tr.querySelector('.delete-btn').onclick = (e) => confirmDelete(id, e.target);
-        fragment.appendChild(tr);
+        document.querySelector("#data-table tbody").appendChild(tr);
     });
 
-    document.querySelector("#data-table tbody").appendChild(fragment); // เทข้อมูลลงรวดเดียว
     setupPagination();
 }
 
@@ -353,7 +351,7 @@ document.getElementById("filter-year").addEventListener("change", applyFilters);
 
 
 // ==========================================
-// 🔒 ADMIN AUTHENTICATION (อัปเกรดดึงรหัสจาก Sheet)
+// 🔒 ADMIN AUTHENTICATION
 // ==========================================
 function checkAdminAuth(callback) {
     if (sessionStorage.getItem('adminAuth') === 'true') {
@@ -368,25 +366,9 @@ function checkAdminAuth(callback) {
         allowEscapeKey: false,
         confirmButtonText: 'เข้าสู่ระบบ',
         confirmButtonColor: '#0f766e',
-        showLoaderOnConfirm: true, // แสดงสถานะโหลดตอนกำลังตรวจรหัส
-        preConfirm: async (password) => {
-            try {
-                // 🌟 ยิง API ไปเช็ครหัสผ่านกับ Google Sheet
-                const response = await fetch(CONFIG.WEB_APP_API, {
-                    method: 'POST',
-                    body: JSON.stringify({ action: 'verifyPassword', password: password })
-                });
-                const result = await response.json();
-
-                if (!result.success) {
-                    Swal.showValidationMessage('รหัสผ่านไม่ถูกต้อง!');
-                    return false;
-                }
-                return true;
-            } catch (error) {
-                Swal.showValidationMessage('การเชื่อมต่อล้มเหลว โปรดลองอีกครั้ง');
-                return false;
-            }
+        preConfirm: (password) => {
+            if (password !== '12211') { Swal.showValidationMessage('รหัสผ่านไม่ถูกต้อง!'); return false; }
+            return true;
         }
     }).then((result) => {
         if (result.isConfirmed) {
