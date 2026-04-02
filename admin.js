@@ -17,36 +17,81 @@ const nextBtn = document.getElementById('nextPageBtn');
 const DEFAULT_AVATAR = "https://upload.wikimedia.org/wikipedia/commons/thumb/6/65/No-Image-Placeholder.svg/330px-No-Image-Placeholder.svg.png";
 
 // ==========================================
+// 🔒 ADMIN AUTHENTICATION
+// ==========================================
+function checkAdminAuth(callback) {
+    if (sessionStorage.getItem('adminAuth') === 'true') {
+        if (callback) callback();
+        return;
+    }
+    Swal.fire({
+        title: '🔒 เข้าสู่ระบบผู้ดูแล',
+        input: 'password',
+        inputPlaceholder: 'กรอกรหัสผ่าน',
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+        confirmButtonText: 'เข้าสู่ระบบ',
+        confirmButtonColor: '#0f766e',
+        showLoaderOnConfirm: true,
+        preConfirm: async (password) => {
+            try {
+                const response = await fetch(CONFIG.WEB_APP_API, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'verifyPassword', password: password })
+                });
+                const result = await response.json();
+
+                if (!result.success) {
+                    Swal.showValidationMessage('รหัสผ่านไม่ถูกต้อง!');
+                    return false;
+                }
+                return true;
+            } catch (error) {
+                Swal.showValidationMessage('การเชื่อมต่อล้มเหลว โปรดลองอีกครั้ง');
+                return false;
+            }
+        }
+    }).then((result) => {
+        if (result.isConfirmed) {
+            sessionStorage.setItem('adminAuth', 'true');
+            if (callback) callback();
+        }
+    });
+}
+
+// ==========================================
 // 🚀 INITIAL LOAD
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
-    fetchDataAndDisplay();
+    // 🌟 บังคับกรอกรหัสก่อนใช้งาน
+    checkAdminAuth(() => {
+        fetchDataAndDisplay();
 
-    const filterInputs = ['filterSearch', 'filterDept', 'filterIn', 'filterDuring', 'filterOut', 'startDate', 'endDate', 'startTime', 'endTime'];
-    filterInputs.forEach(id => {
-        document.getElementById(id).addEventListener('input', () => {
-            currentPage = 1; applyFiltersAndRender();
+        const filterInputs = ['filterSearch', 'filterDept', 'filterIn', 'filterWard', 'filterOut', 'startDate', 'endDate', 'startTime', 'endTime'];
+        filterInputs.forEach(id => {
+            document.getElementById(id).addEventListener('input', () => {
+                currentPage = 1; applyFiltersAndRender();
+            });
         });
+
+        rowsPerPageSelect.addEventListener('change', () => { currentPage = 1; applyFiltersAndRender(); });
+        document.getElementById('sortDescBtn').addEventListener('click', (e) => setSorting(false, e.target));
+        document.getElementById('sortAscBtn').addEventListener('click', (e) => setSorting(true, e.target));
+
+        prevBtn.addEventListener('click', () => { if (currentPage > 1) { currentPage--; renderTable(); } });
+        nextBtn.addEventListener('click', () => {
+            const totalPages = Math.ceil(filteredData.length / parseInt(rowsPerPageSelect.value));
+            if (currentPage < totalPages) { currentPage++; renderTable(); }
+        });
+
+        document.getElementById('closePopup').addEventListener('click', closeModal);
+        document.getElementById('popupModal').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('popupModal')) closeModal();
+        });
+
+        document.getElementById('exportCsvBtn').addEventListener('click', () => exportData('csv'));
+        document.getElementById('exportTxtBtn').addEventListener('click', () => exportData('txt'));
     });
-
-    rowsPerPageSelect.addEventListener('change', () => { currentPage = 1; applyFiltersAndRender(); });
-    document.getElementById('sortDescBtn').addEventListener('click', (e) => setSorting(false, e.target));
-    document.getElementById('sortAscBtn').addEventListener('click', (e) => setSorting(true, e.target));
-
-    prevBtn.addEventListener('click', () => { if (currentPage > 1) { currentPage--; renderTable(); } });
-    nextBtn.addEventListener('click', () => {
-        const totalPages = Math.ceil(filteredData.length / parseInt(rowsPerPageSelect.value));
-        if (currentPage < totalPages) { currentPage++; renderTable(); }
-    });
-
-    document.getElementById('closePopup').addEventListener('click', closeModal);
-    document.getElementById('popupModal').addEventListener('click', (e) => {
-        if (e.target === document.getElementById('popupModal')) closeModal();
-    });
-
-    document.getElementById('exportCsvBtn').addEventListener('click', () => exportData('csv'));
-    document.getElementById('exportTxtBtn').addEventListener('click', () => exportData('txt'));
-
 });
 
 // ==========================================
@@ -54,7 +99,6 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==========================================
 async function fetchDataAndDisplay() {
     try {
-        // ยิง API 2 ตัวพร้อมกันเพื่อความรวดเร็ว
         const [checkinRes, memberRes] = await Promise.all([
             fetch(CONFIG.WEB_APP_API, { method: 'POST', body: JSON.stringify({ action: 'fetchData' }) }),
             fetch(CONFIG.WEB_APP_API, { method: 'POST', body: JSON.stringify({ action: 'fetchData', source: 'member' }) })
@@ -72,7 +116,7 @@ async function fetchDataAndDisplay() {
         }
 
         fullData = rawData.slice(1);
-        membersData = Array.isArray(rawMembers) ? rawMembers.slice(1) : []; // เก็บไว้สำหรับอ้างอิงรูปและชั้นปี
+        membersData = Array.isArray(rawMembers) ? rawMembers.slice(1) : [];
 
         applyFiltersAndRender();
 
@@ -84,7 +128,7 @@ async function fetchDataAndDisplay() {
 }
 
 // ==========================================
-// 📅 DATE FORMATTER (แปลง ISO -> ไทย แบบฉลาด)
+// 📅 DATE FORMATTER
 // ==========================================
 function parseAndFormatDate(dateStr, timeStr) {
     if (!dateStr || dateStr === "-") return { date: "-", time: "-" };
@@ -143,7 +187,7 @@ function setSorting(asc, btnElement) {
 
 function applyFiltersAndRender() {
     const searchVal = document.getElementById('filterSearch').value.toLowerCase();
-    const deptVal = document.getElementById('filterDept').value; // ชั้นปี
+    const deptVal = document.getElementById('filterDept').value;
     const showWard = document.getElementById('filterWard').checked;
     const showIn = document.getElementById('filterIn').checked;
     const showOut = document.getElementById('filterOut').checked;
@@ -157,29 +201,24 @@ function applyFiltersAndRender() {
     const endDateObj = ed ? new Date(ed) : null;
 
     filteredData = fullData.filter(item => {
-        // [2]ชื่อ, [3]รหัส, [4]เข้า/ออก, [11]UserId
         const name = (item[2] || '').toLowerCase();
         const empId = (item[3] || '').toString().toLowerCase();
         const status = item[4] || '';
         const userId = item[11] || '';
 
-        // ดึงข้อมูลชั้นปีจากฐานสมาชิกมาอ้างอิงในการกรอง
         const member = membersData.find(m => m[1] === userId);
         const dept = member ? String(member[4] || '') : '';
 
         const f = parseAndFormatDate(item[6], item[7]);
 
-        // 1. ค้นหา
         if (searchVal && !name.includes(searchVal) && !empId.includes(searchVal)) return false;
         if (deptVal && !dept.includes(deptVal)) return false;
 
-        // 2. สถานะ
         const matchWard = showWard && status === 'ราว ward';
         const matchIn = showIn && status === 'เข้าเวร';
         const matchOut = showOut && status === 'ออกเวร';
         if (!matchWard && !matchIn && !matchOut) return false;
 
-        // 3. วันที่ & เวลา
         if (startDateObj || endDateObj) {
             const itemDateObj = f.rawDateObj;
             if (startDateObj && itemDateObj < startDateObj) return false;
@@ -191,7 +230,6 @@ function applyFiltersAndRender() {
             if (et && f.time > et) return false;
         }
 
-        // แนบข้อมูล member ใส่ไปใน item ชั่วคราวเพื่อเอาไปใช้ตอน Render
         item._memberData = member;
         return true;
     });
@@ -231,8 +269,10 @@ function renderTable() {
         return;
     }
 
+    // 🌟 ใช้ DocumentFragment เพื่อความเร็วขั้นสุด (อัปเดต DOM แค่รอบเดียว)
+    const fragment = document.createDocumentFragment();
+
     pageData.forEach((item, index) => {
-        // จัดการรูปภาพ (ดึงจาก Member และ Checkin)
         let checkinImgUrl = item[1];
         if (!checkinImgUrl || String(checkinImgUrl).trim() === "" || !String(checkinImgUrl).startsWith("http")) checkinImgUrl = DEFAULT_AVATAR;
 
@@ -240,11 +280,9 @@ function renderTable() {
         if (!profileImgUrl || String(profileImgUrl).trim() === "" || !String(profileImgUrl).startsWith("http")) profileImgUrl = DEFAULT_AVATAR;
 
         const dept = item._memberData ? item._memberData[4] : '-';
-
         const styles = getStatusStyle(item[4]);
         const f = parseAndFormatDate(item[6], item[7]);
 
-        // จัดการความล่าช้า (+15 น. แดง / -10 น. ส้ม)
         const statusDetail = item[12] || 'ปกติ';
         const minutes = item[13] || '';
         let lateHtml = '-';
@@ -262,7 +300,7 @@ function renderTable() {
         tr.innerHTML = `
             <td class="px-4 py-3 text-center w-32">
                 <div class="flex items-center justify-center gap-1.5">
-                    <div class="relative cursor-pointer group" onclick="openLightbox('${profileImgUrl}')" title="รูปโปรไฟล์ตอนลงทะเบียน">
+                    <div class="relative cursor-pointer group" onclick="openLightbox('${profileImgUrl}')" title="รูปโปรไฟล์">
                         <img src="${profileImgUrl}" class="h-10 w-10 rounded-full object-cover shadow-sm bg-white border border-slate-200 group-hover:opacity-80 transition">
                         <div class="absolute -bottom-1 -left-1 bg-slate-700 text-white text-[8px] px-1 rounded">โปรไฟล์</div>
                     </div>
@@ -275,7 +313,7 @@ function renderTable() {
             </td>
             <td class="px-4 py-4">
                 <div class="font-bold text-slate-800 text-base truncate mb-0.5">${item[2] || 'ไม่ระบุชื่อ'}</div>
-                <div class="text-sm font-medium text-slate-500">รหัสนิสิต: ${item[3] || '-'} <span class="ml-1 text-medical-600 bg-medical-50 px-1.5 py-0.5 rounded text-xs border border-medical-100">ปี ${dept}</span></div>
+                <div class="text-sm font-medium text-slate-500">รหัส: ${item[3] || '-'} <span class="ml-1 text-medical-600 bg-medical-50 px-1.5 py-0.5 rounded text-xs border border-medical-100">${dept}</span></div>
             </td>
             <td class="px-4 py-4 hidden sm:table-cell">
                 <span class="px-3 py-1.5 text-xs font-bold rounded-lg border ${styles.badge}">${item[4] || '-'}</span>
@@ -300,8 +338,10 @@ function renderTable() {
         tr.querySelector('.view-btn').addEventListener('click', function () {
             openModal(filteredData[this.getAttribute('data-index')]);
         });
-        tableBody.appendChild(tr);
+        fragment.appendChild(tr); // นำแถวไปใส่ในตระกร้า Fragment ก่อน
     });
+
+    tableBody.appendChild(fragment); // เทตระกร้าลงตารางทีเดียว (เร็วมาก)
 
     rowsInfo.textContent = `แสดง ${startIdx + 1}-${Math.min(startIdx + perPage, filteredData.length)} จาก ${filteredData.length} รายการ`;
     prevBtn.disabled = currentPage === 1;
@@ -317,7 +357,6 @@ const modalContent = document.getElementById('popupContent');
 function openModal(item) {
     const f = parseAndFormatDate(item[6], item[7]);
 
-    // รูปภาพ 2 รูป
     document.getElementById('modalCheckinImg').src = item[1] || 'https://via.placeholder.com/100';
     document.getElementById('modalProfileImg').src = item._memberData && item._memberData[5] ? item._memberData[5] : 'https://via.placeholder.com/100';
 
@@ -331,7 +370,6 @@ function openModal(item) {
 
     document.getElementById('modalDateTime').innerHTML = `${f.date} <span class="text-medical-600 ml-1.5">${f.time} น.</span>`;
 
-    // ความล่าช้าใน Modal
     const statusDetail = item[12] || 'ปกติ';
     const minutes = item[13] || '';
     let delayHtml = "-";
