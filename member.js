@@ -1,4 +1,56 @@
 // ==========================================
+// 🎨 DYNAMIC THEME SYSTEM (ระบบสีอัจฉริยะ โหลดไว)
+// ==========================================
+async function loadAndApplyTheme() {
+    // 1. ดึงสีจาก Local Storage มาใช้ทันทีก่อน (0 วินาที ระบบไม่ช้า)
+    const cachedColor = localStorage.getItem('appThemeColor');
+    if (cachedColor) {
+        applyTheme(cachedColor);
+    }
+
+    // 2. ยิง API แบบ Background เพื่อเช็คว่าแอดมินเปลี่ยนสีใหม่ไหม
+    try {
+        const res = await fetch(CONFIG.WEB_APP_API, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'getTheme' })
+        });
+        const data = await res.json();
+
+        if (data.color && data.color !== cachedColor) {
+            // ถ้าสีใหม่ไม่ตรงกับของเดิม ให้บันทึกทับแล้วเปลี่ยนสีหน้าเว็บทันที
+            localStorage.setItem('appThemeColor', data.color);
+            applyTheme(data.color);
+        }
+    } catch (error) {
+        console.log("เช็คอัปเดตสีล้มเหลว ใช้สีเดิมต่อไป");
+    }
+}
+
+// ฟังก์ชันเขียน CSS ทับ Tailwind Class หลัก (medical-700)
+function applyTheme(hexColor) {
+    if (!hexColor || hexColor === '') return;
+
+    let styleTag = document.getElementById('dynamic-theme');
+    if (!styleTag) {
+        styleTag = document.createElement('style');
+        styleTag.id = 'dynamic-theme';
+        document.head.appendChild(styleTag);
+    }
+
+    // บังคับเปลี่ยนสีจุดสำคัญๆ ที่ใช้คลาส medical-700
+    styleTag.innerHTML = `
+        .bg-medical-700 { background-color: ${hexColor} !important; }
+        .text-medical-700 { color: ${hexColor} !important; }
+        .border-medical-700 { border-color: ${hexColor} !important; }
+        .focus\\:border-medical-500:focus { border-color: ${hexColor} !important; }
+        .hover\\:bg-medical-800:hover { filter: brightness(0.9); background-color: ${hexColor} !important; }
+        .bg-medical-50 { background-color: ${hexColor}15 !important; } /* ความโปร่งใส 15% */
+        .text-medical-600 { color: ${hexColor} !important; }
+    `;
+}
+
+
+// ==========================================
 // 🧑‍💼 MEMBER MANAGEMENT SYSTEM
 // ==========================================
 
@@ -396,7 +448,40 @@ function checkAdminAuth(callback) {
     });
 }
 
+// ==========================================
+// 📡 FETCH ROLES TO FILTER (ดึงข้อมูลตำแหน่งจาก Google Sheet)
+// ==========================================
+async function loadRolesToFilter() {
+    try {
+        const res = await fetch(CONFIG.WEB_APP_API, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'getRoles' })
+        });
+        const roles = await res.json();
+
+        const filterYear = document.getElementById('filter-year');
+        filterYear.innerHTML = '<option value="">ทุกตำแหน่ง / ชั้นปี</option>'; // เคลียร์และใส่ค่าตั้งต้น
+
+        roles.forEach(role => {
+            const option = document.createElement('option');
+            option.value = role.name;
+            option.textContent = role.name;
+            // หากต้องการให้โชว์กลุ่มด้วย สามารถแก้เป็น: option.textContent = `${role.name} (${role.group})`;
+            filterYear.appendChild(option);
+        });
+
+    } catch (error) {
+        console.error("Error loading roles:", error);
+    }
+}
+
 // โหลดข้อมูลเมื่อเปิดหน้า (ผ่านการตรวจสอบรหัส)
 window.onload = () => {
-    checkAdminAuth(fetchData);
+    checkAdminAuth(async () => {
+        await loadRolesToFilter(); // โหลดตัวเลือกตำแหน่งให้เสร็จก่อน
+        await fetchData();         // แล้วค่อยโหลดตารางข้อมูลสมาชิก
+    });
+
+    // 🚀 เรียกใช้งานทันที
+    loadAndApplyTheme();
 };

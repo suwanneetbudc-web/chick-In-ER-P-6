@@ -5,6 +5,8 @@
 let fullData = [];
 let membersData = []; // เก็บข้อมูลสมาชิกเพื่อดึงรูปโปรไฟล์/ชั้นปี
 let filteredData = [];
+let rolesData = []; // 🌟 เก็บข้อมูลตำแหน่ง
+let timeSettingsData = []; // 🌟 เก็บข้อมูลหมวดการลงเวลา
 let currentPage = 1;
 let isAscending = false;
 
@@ -17,61 +19,81 @@ const nextBtn = document.getElementById('nextPageBtn');
 const DEFAULT_AVATAR = "https://upload.wikimedia.org/wikipedia/commons/thumb/6/65/No-Image-Placeholder.svg/330px-No-Image-Placeholder.svg.png";
 
 // ==========================================
+// 🎨 DYNAMIC THEME SYSTEM (ระบบสีโหลดไว)
+// ==========================================
+loadAndApplyTheme();
+function loadAndApplyTheme() {
+    const cachedColor = localStorage.getItem('appThemeColor');
+    if (cachedColor) applyTheme(cachedColor);
+    fetch(CONFIG.WEB_APP_API, { method: 'POST', body: JSON.stringify({ action: 'getTheme' }) })
+        .then(res => res.text()).then(text => {
+            try {
+                const data = JSON.parse(text);
+                if (data.color) {
+                    let newColor = data.color.trim();
+                    if (!newColor.startsWith('#')) newColor = '#' + newColor;
+                    if (newColor !== cachedColor) { localStorage.setItem('appThemeColor', newColor); applyTheme(newColor); }
+                }
+            } catch (e) { console.error("Theme Error:", e); }
+        }).catch(e => console.error(e));
+}
+
+function applyTheme(hexColor) {
+    if (!hexColor || hexColor === '') return;
+    let styleTag = document.getElementById('dynamic-theme');
+    if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = 'dynamic-theme'; document.body.appendChild(styleTag); }
+    styleTag.innerHTML = `
+        .bg-medical-700, .bg-medical-600, .bg-medical-800 { background-color: ${hexColor} !important; }
+        .text-medical-700, .text-medical-600 { color: ${hexColor} !important; }
+        .text-medical-100 { color: #f1f5f9 !important; } 
+        .border-medical-700, .border-medical-500, .border-medical-200 { border-color: ${hexColor} !important; }
+        .focus\\:border-medical-600:focus { border-color: ${hexColor} !important; }
+        .focus\\:ring-medical-600:focus { --tw-ring-color: ${hexColor} !important; }
+        .bg-medical-50 { background-color: ${hexColor}1A !important; } 
+        input[type="checkbox"]:checked { background-color: ${hexColor} !important; border-color: ${hexColor} !important; }
+    `;
+}
+
+// ==========================================
 // 🔒 ADMIN AUTHENTICATION
 // ==========================================
 function checkAdminAuth(callback) {
-    if (sessionStorage.getItem('adminAuth') === 'true') {
-        if (callback) callback();
-        return;
-    }
+    if (sessionStorage.getItem('adminAuth') === 'true') { if (callback) callback(); return; }
     Swal.fire({
-        title: '🔒 เข้าสู่ระบบผู้ดูแล',
-        input: 'password',
-        inputPlaceholder: 'กรอกรหัสผ่าน',
-        allowOutsideClick: false,
-        allowEscapeKey: false,
-        confirmButtonText: 'เข้าสู่ระบบ',
-        confirmButtonColor: '#0f766e',
+        title: '🔒 เข้าสู่ระบบผู้ดูแล', input: 'password', allowOutsideClick: false, allowEscapeKey: false, confirmButtonText: 'เข้าสู่ระบบ', confirmButtonColor: localStorage.getItem('appThemeColor') || '#0f766e',
         showLoaderOnConfirm: true,
         preConfirm: async (password) => {
             try {
-                const response = await fetch(CONFIG.WEB_APP_API, {
-                    method: 'POST',
-                    body: JSON.stringify({ action: 'verifyPassword', password: password })
-                });
+                const response = await fetch(CONFIG.WEB_APP_API, { method: 'POST', body: JSON.stringify({ action: 'verifyPassword', password: password }) });
                 const result = await response.json();
-
-                if (!result.success) {
-                    Swal.showValidationMessage('รหัสผ่านไม่ถูกต้อง!');
-                    return false;
-                }
+                if (!result.success) { Swal.showValidationMessage('รหัสผ่านไม่ถูกต้อง!'); return false; }
                 return true;
-            } catch (error) {
-                Swal.showValidationMessage('การเชื่อมต่อล้มเหลว โปรดลองอีกครั้ง');
-                return false;
-            }
+            } catch (error) { Swal.showValidationMessage('การเชื่อมต่อล้มเหลว โปรดลองอีกครั้ง'); return false; }
         }
-    }).then((result) => {
-        if (result.isConfirmed) {
-            sessionStorage.setItem('adminAuth', 'true');
-            if (callback) callback();
-        }
-    });
+    }).then((result) => { if (result.isConfirmed) { sessionStorage.setItem('adminAuth', 'true'); if (callback) callback(); } });
 }
 
 // ==========================================
 // 🚀 INITIAL LOAD
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
-    // 🌟 บังคับกรอกรหัสก่อนใช้งาน
-    checkAdminAuth(() => {
-        fetchDataAndDisplay();
+    checkAdminAuth(async () => {
+        // ดึงข้อมูล Filter และข้อมูลตารางพร้อมกัน
+        await Promise.all([
+            fetchFiltersData(),
+            fetchDataAndDisplay()
+        ]);
 
-        const filterInputs = ['filterSearch', 'filterDept', 'filterIn', 'filterWard', 'filterOut', 'startDate', 'endDate', 'startTime', 'endTime'];
+        const filterInputs = ['filterSearch', 'startDate', 'endDate', 'startTime', 'endTime'];
         filterInputs.forEach(id => {
-            document.getElementById(id).addEventListener('input', () => {
-                currentPage = 1; applyFiltersAndRender();
-            });
+            document.getElementById(id).addEventListener('input', () => { currentPage = 1; applyFiltersAndRender(); });
+        });
+
+        // เมื่อเปลี่ยน Dropdown ตำแหน่ง ให้เปลี่ยน Checkbox ด้วย
+        document.getElementById('filterDept').addEventListener('change', (e) => {
+            renderJobCheckboxes(e.target.value);
+            currentPage = 1;
+            applyFiltersAndRender();
         });
 
         rowsPerPageSelect.addEventListener('change', () => { currentPage = 1; applyFiltersAndRender(); });
@@ -85,14 +107,74 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         document.getElementById('closePopup').addEventListener('click', closeModal);
-        document.getElementById('popupModal').addEventListener('click', (e) => {
-            if (e.target === document.getElementById('popupModal')) closeModal();
-        });
-
+        document.getElementById('popupModal').addEventListener('click', (e) => { if (e.target === document.getElementById('popupModal')) closeModal(); });
         document.getElementById('exportCsvBtn').addEventListener('click', () => exportData('csv'));
         document.getElementById('exportTxtBtn').addEventListener('click', () => exportData('txt'));
     });
 });
+
+// ==========================================
+// 📡 FETCH FILTERS (ดึงข้อมูลตัวกรอง)
+// ==========================================
+async function fetchFiltersData() {
+    try {
+        const [rolesRes, timeRes] = await Promise.all([
+            fetch(CONFIG.WEB_APP_API, { method: 'POST', body: JSON.stringify({ action: 'getRoles' }) }),
+            fetch(CONFIG.WEB_APP_API, { method: 'POST', body: JSON.stringify({ action: 'getTimeSettings' }) })
+        ]);
+        rolesData = await rolesRes.json();
+        timeSettingsData = await timeRes.json();
+
+        // ใส่ข้อมูลลง Dropdown ตำแหน่ง
+        const deptSelect = document.getElementById('filterDept');
+        deptSelect.innerHTML = '<option value="">ทุกตำแหน่ง / ชั้นปี</option>';
+        rolesData.forEach(role => {
+            const opt = document.createElement('option');
+            opt.value = role.name; opt.textContent = role.name;
+            deptSelect.appendChild(opt);
+        });
+
+        // โหลด Checkbox เริ่มต้น
+        renderJobCheckboxes("");
+    } catch (error) {
+        console.error("Error fetching filters:", error);
+    }
+}
+
+function renderJobCheckboxes(selectedRole) {
+    const container = document.getElementById('filterJobContainer');
+    container.innerHTML = '';
+
+    // กรองหมวดที่ตรงกับตำแหน่ง
+    let availableJobs = timeSettingsData;
+    if (selectedRole) {
+        availableJobs = timeSettingsData.filter(t => t.role === selectedRole || t.role === '?' || !t.role.trim());
+    }
+    if (availableJobs.length === 0) availableJobs = timeSettingsData;
+
+    const uniqueJobs = new Set();
+    const themeColor = localStorage.getItem('appThemeColor') || '#0d9488';
+
+    availableJobs.forEach(item => {
+        if (item.job && !uniqueJobs.has(item.job)) {
+            uniqueJobs.add(item.job);
+
+            const label = document.createElement('label');
+            label.className = "inline-flex items-center cursor-pointer";
+            label.innerHTML = `
+                <input type="checkbox" value="${item.job}" checked class="filter-job-checkbox rounded text-medical-600 focus:ring-medical-600 w-4 h-4 cursor-pointer" style="accent-color: ${themeColor};"> 
+                <span class="ml-2 font-medium text-slate-700">${item.job}</span>
+            `;
+
+            // สั่งให้เมื่อกด Checkbox ตัวกรองทำงานทันที
+            label.querySelector('input').addEventListener('change', () => {
+                currentPage = 1;
+                applyFiltersAndRender();
+            });
+            container.appendChild(label);
+        }
+    });
+}
 
 // ==========================================
 // 📡 FETCH DATA (ดึงข้อมูลลงเวลา + ข้อมูลนิสิต)
@@ -103,8 +185,6 @@ async function fetchDataAndDisplay() {
             fetch(CONFIG.WEB_APP_API, { method: 'POST', body: JSON.stringify({ action: 'fetchData' }) }),
             fetch(CONFIG.WEB_APP_API, { method: 'POST', body: JSON.stringify({ action: 'fetchData', source: 'member' }) })
         ]);
-
-        if (!checkinRes.ok || !memberRes.ok) throw new Error('Network response error');
 
         const rawData = await checkinRes.json();
         const rawMembers = await memberRes.json();
@@ -128,7 +208,7 @@ async function fetchDataAndDisplay() {
 }
 
 // ==========================================
-// 📅 DATE FORMATTER
+// 📅 DATE FORMATTER & SORTING
 // ==========================================
 function parseAndFormatDate(dateStr, timeStr) {
     if (!dateStr || dateStr === "-") return { date: "-", time: "-" };
@@ -174,9 +254,6 @@ function parseDateTimeForSort(dateStr, timeStr) {
     return d.getTime();
 }
 
-// ==========================================
-// 🔍 FILTER & SORTING
-// ==========================================
 function setSorting(asc, btnElement) {
     isAscending = asc;
     document.getElementById('sortDescBtn').className = "px-5 py-2.5 text-sm font-bold bg-white text-slate-500 hover:bg-slate-50 transition";
@@ -188,9 +265,8 @@ function setSorting(asc, btnElement) {
 function applyFiltersAndRender() {
     const searchVal = document.getElementById('filterSearch').value.toLowerCase();
     const deptVal = document.getElementById('filterDept').value;
-    const showWard = document.getElementById('filterWard').checked;
-    const showIn = document.getElementById('filterIn').checked;
-    const showOut = document.getElementById('filterOut').checked;
+
+    const checkedJobs = Array.from(document.querySelectorAll('.filter-job-checkbox:checked')).map(cb => cb.value);
 
     const sd = document.getElementById('startDate').value;
     const ed = document.getElementById('endDate').value;
@@ -213,11 +289,7 @@ function applyFiltersAndRender() {
 
         if (searchVal && !name.includes(searchVal) && !empId.includes(searchVal)) return false;
         if (deptVal && !dept.includes(deptVal)) return false;
-
-        const matchWard = showWard && status === 'ราว ward';
-        const matchIn = showIn && status === 'เข้าเวร';
-        const matchOut = showOut && status === 'ออกเวร';
-        if (!matchWard && !matchIn && !matchOut) return false;
+        if (checkedJobs.length > 0 && !checkedJobs.includes(status)) return false;
 
         if (startDateObj || endDateObj) {
             const itemDateObj = f.rawDateObj;
@@ -247,10 +319,9 @@ function applyFiltersAndRender() {
 // 🗂️ RENDER TABLE
 // ==========================================
 function getStatusStyle(status) {
-    if (status === 'เข้าเวร') return { dot: 'dot-green', badge: 'bg-medical-50 text-medical-700 border-medical-200' };
-    if (status === 'ออกเวร') return { dot: 'dot-red', badge: 'bg-rose-50 text-rose-700 border-rose-200' };
-    if (status === 'ราว ward') return { dot: 'dot-yellow', badge: 'bg-amber-50 text-amber-700 border-amber-200' };
-    return { dot: 'dot-gray', badge: 'bg-slate-100 text-slate-600 border-slate-200' };
+    if (status.includes('เข้า')) return { dot: 'dot-green', badge: 'bg-medical-50 text-medical-700 border-medical-200' };
+    if (status.includes('ออก')) return { dot: 'dot-red', badge: 'bg-rose-50 text-rose-700 border-rose-200' };
+    return { dot: 'dot-yellow', badge: 'bg-amber-50 text-amber-700 border-amber-200' };
 }
 
 function renderTable() {
@@ -269,7 +340,6 @@ function renderTable() {
         return;
     }
 
-    // 🌟 ใช้ DocumentFragment เพื่อความเร็วขั้นสุด (อัปเดต DOM แค่รอบเดียว)
     const fragment = document.createDocumentFragment();
 
     pageData.forEach((item, index) => {
@@ -302,12 +372,10 @@ function renderTable() {
                 <div class="flex items-center justify-center gap-1.5">
                     <div class="relative cursor-pointer group" onclick="openLightbox('${profileImgUrl}')" title="รูปโปรไฟล์">
                         <img src="${profileImgUrl}" class="h-10 w-10 rounded-full object-cover shadow-sm bg-white border border-slate-200 group-hover:opacity-80 transition">
-                        <div class="absolute -bottom-1 -left-1 bg-slate-700 text-white text-[8px] px-1 rounded">โปรไฟล์</div>
                     </div>
                     <div class="relative cursor-pointer group" onclick="openLightbox('${checkinImgUrl}')" title="รูปตอนลงเวลา">
                         <img src="${checkinImgUrl}" class="h-10 w-10 rounded-full object-cover shadow-sm bg-white border-2 border-medical-300 group-hover:opacity-80 transition">
                         <div class="status-dot ${styles.dot}"></div>
-                        <div class="absolute -bottom-1 -right-1 bg-medical-600 text-white text-[8px] px-1 rounded">ล่าสุด</div>
                     </div>
                 </div>
             </td>
@@ -335,13 +403,11 @@ function renderTable() {
             </td>
         `;
 
-        tr.querySelector('.view-btn').addEventListener('click', function () {
-            openModal(filteredData[this.getAttribute('data-index')]);
-        });
-        fragment.appendChild(tr); // นำแถวไปใส่ในตระกร้า Fragment ก่อน
+        tr.querySelector('.view-btn').addEventListener('click', function () { openModal(filteredData[this.getAttribute('data-index')]); });
+        fragment.appendChild(tr);
     });
 
-    tableBody.appendChild(fragment); // เทตระกร้าลงตารางทีเดียว (เร็วมาก)
+    tableBody.appendChild(fragment);
 
     rowsInfo.textContent = `แสดง ${startIdx + 1}-${Math.min(startIdx + perPage, filteredData.length)} จาก ${filteredData.length} รายการ`;
     prevBtn.disabled = currentPage === 1;
@@ -397,96 +463,60 @@ const lightboxModal = document.getElementById('lightboxModal');
 const lightboxImg = document.getElementById('lightboxImg');
 
 function openLightbox(url) {
-    lightboxImg.src = url;
-    lightboxModal.classList.remove('hidden');
-    setTimeout(() => {
-        lightboxModal.classList.remove('opacity-0');
-        lightboxImg.classList.remove('scale-95');
-    }, 10);
+    lightboxImg.src = url; lightboxModal.classList.remove('hidden');
+    setTimeout(() => { lightboxModal.classList.remove('opacity-0'); lightboxImg.classList.remove('scale-95'); }, 10);
 }
-
 function closeLightbox() {
-    lightboxModal.classList.add('opacity-0');
-    lightboxImg.classList.add('scale-95');
+    lightboxModal.classList.add('opacity-0'); lightboxImg.classList.add('scale-95');
     setTimeout(() => { lightboxModal.classList.add('hidden'); lightboxImg.src = ''; }, 300);
 }
-
-lightboxModal.addEventListener('click', (e) => {
-    if (e.target !== lightboxImg) closeLightbox();
-});
+lightboxModal.addEventListener('click', (e) => { if (e.target !== lightboxImg) closeLightbox(); });
 
 // ==========================================
 // 💾 EXPORT DATA
 // ==========================================
 function getExportColumns() {
-    const cols = [];
-    if (document.getElementById('colImage').checked) cols.push({ i: 1, name: 'รูปภาพ' });
-    if (document.getElementById('colEmployeeId').checked) cols.push({ i: 3, name: 'รหัสนิสิต' });
-    if (document.getElementById('colName').checked) cols.push({ i: 2, name: 'ชื่อ' });
-    if (document.getElementById('colStatus').checked) cols.push({ i: 4, name: 'สถานะ' });
-    if (document.getElementById('colLate').checked) cols.push({ i: 'LATE', name: 'ความล่าช้า' });
-    if (document.getElementById('colNote').checked) cols.push({ i: 5, name: 'หมายเหตุ' });
-    if (document.getElementById('colDate').checked) cols.push({ i: 'DATE', name: 'วันที่' });
-    if (document.getElementById('colTime').checked) cols.push({ i: 'TIME', name: 'เวลา' });
-    if (document.getElementById('colLocation').checked) cols.push({ i: 8, name: 'สถานที่' });
-    return cols;
+    return [
+        { i: 1, name: 'รูปภาพ', checked: document.getElementById('colImage').checked },
+        { i: 3, name: 'รหัสนิสิต', checked: document.getElementById('colEmployeeId').checked },
+        { i: 2, name: 'ชื่อ', checked: document.getElementById('colName').checked },
+        { i: 4, name: 'สถานะ', checked: document.getElementById('colStatus').checked },
+        { i: 'LATE', name: 'ความล่าช้า', checked: document.getElementById('colLate').checked },
+        { i: 5, name: 'หมายเหตุ', checked: document.getElementById('colNote').checked },
+        { i: 'DATE', name: 'วันที่', checked: document.getElementById('colDate').checked },
+        { i: 'TIME', name: 'เวลา', checked: document.getElementById('colTime').checked }
+    ].filter(c => c.checked);
 }
 
 function exportData(type) {
     if (filteredData.length === 0) return Swal.fire('ไม่มีข้อมูล', 'ไม่มีข้อมูลที่ตรงกับเงื่อนไขสำหรับการส่งออก', 'warning');
-
     const cols = getExportColumns();
-    let content = '';
-    let fileName = `Export_${new Date().getTime()}`;
-
+    let content = type === 'csv' ? '\uFEFF' + cols.map(c => `"${c.name}"`).join(',') + '\n' : cols.map(c => c.name).join('\t') + '\n';
+    let fileName = `Export_${new Date().getTime()}.${type}`;
     Swal.fire({ title: 'กำลังเตรียมไฟล์...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
     try {
-        if (type === 'custom_txt') {
-            content = 'รหัสที่เครื่อง\tวัน/เวลา\n';
-            filteredData.forEach(row => {
-                const f = parseAndFormatDate(row[6], row[7]);
-                content += `${row[3] || ''}\t${f.date} ${f.time}\n`;
-            });
-            fileName += '.txt';
-            downloadBlob(content, fileName, 'text/plain;charset=utf-8');
+        filteredData.forEach(row => {
+            const f = parseAndFormatDate(row[6], row[7]);
+            let rowStr = cols.map(c => {
+                let cell = '';
+                if (c.i === 'DATE') cell = f.date;
+                else if (c.i === 'TIME') cell = f.time;
+                else if (c.i === 'LATE') cell = row[12] === 'สาย' || row[12] === 'ออกก่อนเวลา' ? `${row[12]} ${row[13]} นาที` : (row[12] || '-');
+                else cell = (row[c.i] || '').toString();
 
-        } else if (type === 'txt') {
-            content = cols.map(c => c.name).join('\t') + '\n';
-            filteredData.forEach(row => {
-                const f = parseAndFormatDate(row[6], row[7]);
-                content += cols.map(c => {
-                    if (c.i === 'DATE') return f.date;
-                    if (c.i === 'TIME') return f.time;
-                    if (c.i === 'LATE') return row[12] === 'สาย' || row[12] === 'ออกก่อนเวลา' ? `${row[12]} ${row[13]} นาที` : (row[12] || '-');
-                    return (row[c.i] || '').toString().replace(/\t/g, ' ');
-                }).join('\t') + '\n';
-            });
-            fileName += '.txt';
-            downloadBlob(content, fileName, 'text/plain;charset=utf-8');
+                if (type === 'csv') return `"${cell.replace(/"/g, '""')}"`;
+                return cell.replace(/\t/g, ' ');
+            }).join(type === 'csv' ? ',' : '\t') + '\n';
+            content += rowStr;
+        });
 
-        } else if (type === 'csv') {
-            content = '\uFEFF' + cols.map(c => `"${c.name}"`).join(',') + '\n';
-            filteredData.forEach(row => {
-                const f = parseAndFormatDate(row[6], row[7]);
-                content += cols.map(c => {
-                    let cell = '';
-                    if (c.i === 'DATE') cell = f.date;
-                    else if (c.i === 'TIME') cell = f.time;
-                    else if (c.i === 'LATE') cell = row[12] === 'สาย' || row[12] === 'ออกก่อนเวลา' ? `${row[12]} ${row[13]} นาที` : (row[12] || '-');
-                    else cell = (row[c.i] || '').toString();
+        // 🌟 เรียกใช้งานฟังก์ชัน downloadBlob เพื่อลดความซ้ำซ้อน
+        const mimeType = type === 'csv' ? 'text/csv;charset=utf-8' : 'text/plain;charset=utf-8';
+        downloadBlob(content, fileName, mimeType);
 
-                    cell = cell.replace(/"/g, '""');
-                    return `"${cell}"`;
-                }).join(',') + '\n';
-            });
-            fileName += '.csv';
-            downloadBlob(content, fileName, 'text/csv;charset=utf-8');
-        }
         Swal.close();
-    } catch (e) {
-        Swal.fire('Error', 'เกิดข้อผิดพลาดในการส่งออกไฟล์', 'error');
-    }
+    } catch (e) { Swal.fire('Error', 'เกิดข้อผิดพลาดในการส่งออกไฟล์', 'error'); }
 }
 
 function downloadBlob(content, fileName, mimeType) {
